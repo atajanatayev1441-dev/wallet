@@ -166,11 +166,9 @@ def send_users_excel(chat_id):
     filename = "users.csv"
     with open(filename, "w", encoding="utf-8", newline="") as f:
         f.write(output.getvalue())
-    with open(filename, "rb") as f:
-        # Telegram Bot API для отправки файлов требует POST и multipart/form-data,
-        # но без сторонних библиотек реализовать сложно,
-        # поэтому отправим простым сообщением с файлом через chat_id.
-        send_message(TOKEN, ADMIN_ID, "Пользователи (User IDs):\n" + "\n".join(str(u) for u in users))
+    # Здесь нет простой возможности отправить файл без сторонних библиотек,
+    # так что отправим просто список ID
+    send_message(TOKEN, ADMIN_ID, "Пользователи (User IDs):\n" + "\n".join(str(u) for u in users))
     os.remove(filename)
 
 def handle_admin_broadcast(chat_id, text):
@@ -192,7 +190,6 @@ def handle_message(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
 
-    # Добавляем пользователя если новый
     if chat_id not in users:
         users.add(chat_id)
         save_users()
@@ -234,7 +231,6 @@ def handle_message(update):
         handle_admin_broadcast(chat_id, text)
         return
 
-    # Обработка команд меню
     if text == "➕ Добавить доход":
         add_income_start(chat_id)
     elif text == "➖ Добавить расход":
@@ -273,6 +269,8 @@ def main():
     global user_data
     global user_currency
     global user_states
+
+    offset = 0
 
     users = load_users()
     user_data = load_user_data()
