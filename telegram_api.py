@@ -2,48 +2,48 @@ import urllib.request
 import urllib.parse
 import json
 
-API_URL = "https://api.telegram.org/bot{token}/{method}"
-
-def api_call(token, method, params=None):
-    url = API_URL.format(token=token, method=method)
-    if params:
-        data = urllib.parse.urlencode(params).encode('utf-8')
-    else:
-        data = None
-    req = urllib.request.Request(url, data=data)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp_data = resp.read()
-            return json.loads(resp_data.decode('utf-8'))
-    except Exception as e:
-        print(f"Telegram API call error: {e}")
-        return None
-
-def get_updates(token, offset=0, timeout=20):
-    params = {"timeout": timeout}
+def get_updates(token, offset=None, timeout=10):
+    url = f"https://api.telegram.org/bot{token}/getUpdates?timeout={timeout}"
     if offset:
-        params["offset"] = offset
-    result = api_call(token, "getUpdates", params)
-    if result and result.get("ok"):
-        return result.get("result", [])
-    return []
+        url += f"&offset={offset}"
+    try:
+        with urllib.request.urlopen(url) as response:
+            data = response.read()
+            return json.loads(data).get("result", [])
+    except Exception as e:
+        print(f"Telegram API call error in get_updates: {e}")
+        return []
 
-def send_message(token, chat_id, text, reply_markup=None):
-    params = {
+def send_message(token, chat_id, text, reply_markup=None, parse_mode="HTML"):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    data = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "parse_mode": parse_mode,
+        "disable_web_page_preview": True,
     }
     if reply_markup:
-        params["reply_markup"] = json.dumps(reply_markup)
-    return api_call(token, "sendMessage", params)
+        data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    encoded_data = urllib.parse.urlencode(data).encode("utf-8")
+    try:
+        with urllib.request.urlopen(url, data=encoded_data) as response:
+            return json.loads(response.read())
+    except Exception as e:
+        print(f"Telegram API call error in send_message: {e}")
+        return None
 
 def answer_callback_query(token, callback_query_id, text=None, show_alert=False):
-    params = {
+    url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
+    data = {
         "callback_query_id": callback_query_id,
         "show_alert": show_alert,
     }
     if text:
-        params["text"] = text
-    return api_call(token, "answerCallbackQuery", params)
+        data["text"] = text
+    encoded_data = urllib.parse.urlencode(data).encode("utf-8")
+    try:
+        with urllib.request.urlopen(url, data=encoded_data) as response:
+            return json.loads(response.read())
+    except Exception as e:
+        print(f"Telegram API call error in answer_callback_query: {e}")
+        return None
