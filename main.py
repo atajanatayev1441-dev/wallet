@@ -19,7 +19,7 @@ ADMIN_ID = 8283258905  # <- Впиши сюда свой Telegram ID
 CURRENCIES = {
     "RUB": "₽",
     "USD": "$",
-    "TMT": 
+    "TMT": "T"
 }
 
 CURRENCY_STICKERS = {
@@ -274,4 +274,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
