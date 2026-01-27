@@ -10,97 +10,14 @@ if not TOKEN:
     raise RuntimeError("BOT_TOKEN is not set. Set it in environment variables.")
 
 offset = 0
-
 user_currency = {}  # chat_id -> currency
 
-# Стикеры для валют (примерные, замените на свои, если есть)
-STICKERS = {
-    "RUB": "CAACAgIAAxkBAAIBHmHqg6R7_R8US-V7C1d27gU8RxFwAAKdBAACGhTgSvhN14Xw45bsLwQ",
-    "USD": "CAACAgIAAxkBAAIBIGHqg67DxFjkDTr6ZAmvsk2yk-6WAAJhBAACGhTgSn1DrRzknzxVvLwQ",
-    "TMT": "CAACAgIAAxkBAAIBIWHqg6eX6aHYo2ycbVjL8DkQwFtuAAJfBAACGhTgSnESevjE6ivF4LwQ"
-}
+# Состояния пользователя для диалогов
+user_states = {}  # chat_id -> dict с текущим состоянием, например {'action': 'add_income', 'step': 1, ...}
 
-import json
-
-def build_inline_keyboard(buttons):
-    """
-    Формируем JSON инлайн-клавиатуру.
-    buttons - список списков кнопок: [[{"text": "Текст", "callback_data": "data"}], [...]]
-    """
-    keyboard = {
-        "inline_keyboard": buttons
-    }
-    return json.dumps(keyboard)
-
-def send_sticker(token, chat_id, sticker_id):
-    params = {
-        "chat_id": chat_id,
-        "sticker": sticker_id
-    }
-    return api_call(token, "sendSticker", params)
-
-def start_message(chat_id):
-    text = (
-        "👋 <b>Привет! Выберите валюту для учёта доходов и расходов:</b>"
-    )
-    buttons = [
-        [{"text": "🇷🇺 RUB", "callback_data": "currency_RUB"},
-         {"text": "🇺🇸 USD", "callback_data": "currency_USD"},
-         {"text": "🇹🇲 TMT", "callback_data": "currency_TMT"}]
-    ]
-    reply_markup = build_inline_keyboard(buttons)
-    send_message(TOKEN, chat_id, text, reply_markup)
-
-def main():
-    global offset
-    global user_currency
-
-    print("Bot started")
-    while True:
-        updates = get_updates(TOKEN, offset)
-        if not updates:
-            time.sleep(1)
-            continue
-
-        for update in updates:
-            offset = update["update_id"] + 1
-
-            if "message" in update:
-                message = update["message"]
-                chat_id = message["chat"]["id"]
-                text = message.get("text", "")
-
-                # Если юзер еще не выбрал валюту — просим выбрать
-                if chat_id not in user_currency and text == "/start":
-                    start_message(chat_id)
-                    continue
-
-                # Если валюта выбрана, обрабатываем команды и кнопки
-                if chat_id in user_currency:
-                    # Здесь вызов твоей функции handle_message, передав валюту при необходимости
-                    handle_message(message, user_currency[chat_id])
-                else:
-                    # Если пользователь пишет не /start и не выбрал валюту
-                    send_message(TOKEN, chat_id, "Пожалуйста, выберите валюту командой /start.")
-
-            elif "callback_query" in update:
-                callback = update["callback_query"]
-                data = callback["data"]
-                chat_id = callback["message"]["chat"]["id"]
-
-                if data.startswith("currency_"):
-                    currency = data.split("_")[1]
-                    user_currency[chat_id] = currency
-                    send_message(TOKEN, chat_id, f"✅ Валюта установлена: {currency}")
-
-                    # Отправляем стикер в зависимости от валюты
-                    sticker_id = STICKERS.get(currency)
-                    if sticker_id:
-                        send_sticker(TOKEN, chat_id, sticker_id)
-
-                    # Отправляем главное меню
-                    text, reply_markup = start_message_text_and_keyboard()
-                    send_message(TOKEN, chat_id, text, reply_markup)
+def reset_state(chat_id):
+    if chat_id in user_states:
+        del user_states[chat_id]
 
 def start_message_text_and_keyboard():
     text = (
@@ -126,22 +43,151 @@ def start_message_text_and_keyboard():
     return text, reply_markup
 
 def handle_message(message, currency):
-    # Твой существующий handle_message с учетом валюты
     chat_id = message["chat"]["id"]
     text = message.get("text", "").strip()
 
-    # Пример: добавим валюту в ответ
+    # Проверяем, в каком состоянии пользователь
+    state = user_states.get(chat_id)
+
     if text == "/start":
+        reset_state(chat_id)
         text, reply_markup = start_message_text_and_keyboard()
         send_message(TOKEN, chat_id, text, reply_markup)
         return
 
-    # Остальная обработка с учетом currency...
-    send_message(TOKEN, chat_id, f"Выбранная валюта: {currency}\nКоманда: {text}\n(Логика обработки здесь)")
+    if state:
+        # Пользователь в процессе ввода дохода/расхода
+        if state['action'] == 'add_income':
+            if state['step'] == 1:
+                # Получили сумму
+                try:
+                    amount = float(text.replace(",", "."))
+                    if amount <= 0:
+                        raise ValueError
+                    user_states[chat_id]['amount'] = amount
+                    user_states[chat_id]['step'] = 2
+                    send_message(TOKEN, chat_id, "Введите источник дохода (например, зарплата, подарок):")
+                except ValueError:
+                    send_message(TOKEN, chat_id, "❗ Пожалуйста, введите корректную положительную сумму.")
+                return
+            elif state['step'] == 2:
+                source = text
+                amount = user_states[chat_id]['amount']
+                from wallet import WalletManager
+                wallet = WalletManager("data.json")
+                wallet.add_income(amount, source)
+                send_message(TOKEN, chat_id, f"💰 Доход +{amount} {currency} добавлен.\nИсточник: {source}")
+                reset_state(chat_id)
+                return
+
+        elif state['action'] == 'add_expense':
+            if state['step'] == 1:
+                try:
+                    amount = float(text.replace(",", "."))
+                    if amount <= 0:
+                        raise ValueError
+                    user_states[chat_id]['amount'] = amount
+                    user_states[chat_id]['step'] = 2
+                    send_message(TOKEN, chat_id, "Введите категорию расхода (например, еда, транспорт):")
+                except ValueError:
+                    send_message(TOKEN, chat_id, "❗ Пожалуйста, введите корректную положительную сумму.")
+                return
+            elif state['step'] == 2:
+                category = text
+                user_states[chat_id]['category'] = category
+                user_states[chat_id]['step'] = 3
+                send_message(TOKEN, chat_id, "Введите комментарий к расходу (можно оставить пустым):")
+                return
+            elif state['step'] == 3:
+                comment = text
+                amount = user_states[chat_id]['amount']
+                category = user_states[chat_id]['category']
+                from wallet import WalletManager
+                wallet = WalletManager("data.json")
+                wallet.add_expense(amount, category, comment)
+                send_message(TOKEN, chat_id, f"🛒 Расход -{amount} {currency} добавлен.\nКатегория: {category}\nКомментарий: {comment if comment else '-'}")
+                reset_state(chat_id)
+                return
+
+    # Если пользователь не в диалоге — обработка команд и кнопок
+    if text == "➕ Добавить доход" or text.startswith("/add_income"):
+        user_states[chat_id] = {'action': 'add_income', 'step': 1}
+        send_message(TOKEN, chat_id, "Введите сумму дохода:")
+        return
+
+    if text == "➖ Добавить расход" or text.startswith("/add_expense"):
+        user_states[chat_id] = {'action': 'add_expense', 'step': 1}
+        send_message(TOKEN, chat_id, "Введите сумму расхода:")
+        return
+
+    if text == "💰 Баланс" or text.startswith("/balance"):
+        from wallet import WalletManager
+        wallet = WalletManager("data.json")
+        balance, total_income, total_expense = wallet.get_balance()
+        send_message(TOKEN, chat_id,
+                     f"🏦 Текущий баланс: <b>{balance:.2f} {currency}</b>\n"
+                     f"Доходы: {total_income:.2f} {currency}\n"
+                     f"Расходы: {total_expense:.2f} {currency}")
+        return
+
+    if text == "📊 Отчёт" or text.startswith("/report"):
+        from wallet import WalletManager
+        wallet = WalletManager("data.json")
+        report = wallet.get_report()
+        send_message(TOKEN, chat_id, report)
+        return
+
+    if text == "📂 Категории" or text.startswith("/categories"):
+        from wallet import WalletManager
+        wallet = WalletManager("data.json")
+        categories_report = wallet.get_categories_report()
+        send_message(TOKEN, chat_id, categories_report)
+        return
+
+    if text == "📩 Связь с админом" or text.startswith("/support"):
+        send_message(TOKEN, chat_id,
+                     "Напишите сообщение после команды /support, и оно будет отправлено администратору.")
+        return
+
+    if text.startswith("/support"):
+        support_msg = text[len("/support"):].strip()
+        if not support_msg:
+            send_message(TOKEN, chat_id, "❗ Напишите сообщение после команды /support")
+            return
+        send_message(TOKEN, ADMIN_ID, f"📩 Сообщение от пользователя {chat_id}:\n{support_msg}")
+        send_message(TOKEN, chat_id, "✅ Ваше сообщение отправлено администратору.")
+        return
+
+    send_message(TOKEN, chat_id, "❓ Неизвестная команда. Напишите /start для начала.")
+
+def main():
+    global offset
+    global user_currency
+
+    print("Bot started")
+    while True:
+        updates = get_updates(TOKEN, offset)
+        if not updates:
+            time.sleep(1)
+            continue
+
+        for update in updates:
+            offset = update["update_id"] + 1
+
+            if "message" in update:
+                message = update["message"]
+                chat_id = message["chat"]["id"]
+
+                # Проверяем валюту для пользователя
+                if chat_id not in user_currency:
+                    # Можно использовать дефолтную валюту, например RUB
+                    user_currency[chat_id] = "RUB"
+
+                handle_message(message, user_currency[chat_id])
+
+            elif "callback_query" in update:
+                # Обработка callback_query, если есть (например, для выбора валюты)
+                pass
 
 if __name__ == "__main__":
     main()
-
-
-
-
