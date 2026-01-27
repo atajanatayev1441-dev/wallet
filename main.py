@@ -3,8 +3,8 @@ import json
 import datetime
 from telegram_api import get_updates, send_message, answer_callback_query
 
-TOKEN = "ВАШ_ТОКЕН_ЗДЕСЬ"
-ADMIN_ID = 123456789  # Ваш ID
+TOKEN = "8263345320:AAFr3_tHDhX_x0eNywQkq-SCXBTQG7avYvk"
+ADMIN_ID = 8283258905  # Ваш ID
 
 USERS_FILE = "users.json"
 DATA_FILE = "data.json"
@@ -351,3 +351,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
