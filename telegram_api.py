@@ -8,8 +8,6 @@ def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
     if params is not None:
         data = urllib.parse.urlencode(params).encode('utf-8')
-        url = url + "?" + urllib.parse.urlencode(params)
-        data = None  # для get запросов данные не нужны
     else:
         data = None
 
@@ -22,7 +20,7 @@ def api_call(token, method, params=None):
         print(f"Telegram API call error: {e}")
         return None
 
-def get_updates(token, offset=0, timeout=10):
+def get_updates(token, offset=0, timeout=20):
     params = {"timeout": timeout}
     if offset:
         params["offset"] = offset
@@ -35,9 +33,19 @@ def send_message(token, chat_id, text, reply_markup=None):
     params = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML"
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True
     }
     if reply_markup:
-        params["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+        params["reply_markup"] = json.dumps(reply_markup)
     result = api_call(token, "sendMessage", params)
     return result
+
+def answer_callback_query(token, callback_query_id, text=None, show_alert=False):
+    params = {
+        "callback_query_id": callback_query_id,
+        "show_alert": show_alert,
+    }
+    if text:
+        params["text"] = text
+    api_call(token, "answerCallbackQuery", params)
