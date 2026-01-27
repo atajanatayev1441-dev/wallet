@@ -6,10 +6,14 @@ API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
-    if params is not None:
-        data = urllib.parse.urlencode(params).encode()
+    if params:
+        query_string = urllib.parse.urlencode(params)
+        url = f"{url}?{query_string}"
+        data = None
     else:
         data = None
+
+    print(f"Calling URL: {url}")
 
     req = urllib.request.Request(url, data=data)
     try:
