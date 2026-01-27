@@ -1,21 +1,22 @@
 import urllib.request
-import urllib.parse
 import json
 
 API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
+    headers = {"Content-Type": "application/json"}
+
     if params is not None:
-        data = urllib.parse.urlencode(params).encode()
+        data = json.dumps(params).encode('utf-8')
     else:
         data = None
 
-    req = urllib.request.Request(url, data=data)
+    req = urllib.request.Request(url, data=data, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             resp_data = response.read()
-            return json.loads(resp_data.decode())
+            return json.loads(resp_data.decode('utf-8'))
     except Exception as e:
         print(f"Telegram API call error: {e}")
         return None
