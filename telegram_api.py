@@ -6,22 +6,10 @@ API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
-    if params:
-        # reply_markup должен быть JSON-строкой, не urlencode
-        # Поэтому отдельно обрабатываем reply_markup
-        params_for_url = {}
-        for key, value in params.items():
-            if key == "reply_markup" and value is not None:
-                params_for_url[key] = value  # уже json.dumps
-            else:
-                params_for_url[key] = str(value)
-        query_string = urllib.parse.urlencode(params_for_url)
-        url = f"{url}?{query_string}"
-        data = None
+    if params is not None:
+        data = urllib.parse.urlencode(params).encode()
     else:
         data = None
-
-    print(f"Calling URL: {url}")
 
     req = urllib.request.Request(url, data=data)
     try:
@@ -50,4 +38,12 @@ def send_message(token, chat_id, text, reply_markup=None):
     if reply_markup:
         params["reply_markup"] = reply_markup
     result = api_call(token, "sendMessage", params)
+    return result
+
+def send_sticker(token, chat_id, sticker_id):
+    params = {
+        "chat_id": chat_id,
+        "sticker": sticker_id
+    }
+    result = api_call(token, "sendSticker", params)
     return result
