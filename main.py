@@ -182,7 +182,6 @@ def handle_message(message, currency, user_data):
         send_message(TOKEN, chat_id, "Действие отменено. Главное меню:", reply_markup)
         return
 
-    # Команда /users (только для админа)
     if text == "/users" or text == "👥 Количество пользователей":
         if chat_id == ADMIN_ID:
             send_users_file(TOKEN, chat_id, users)
@@ -190,7 +189,6 @@ def handle_message(message, currency, user_data):
             send_message(TOKEN, chat_id, "❌ Эта команда доступна только администратору.")
         return
 
-    # Команда отправки сообщения всем (только для админа)
     if text == "📢 Отправить всем":
         if chat_id == ADMIN_ID:
             user_states[chat_id] = {'action': 'broadcast'}
@@ -345,8 +343,14 @@ def main():
     while True:
         try:
             updates = get_updates(TOKEN, offset)
+
             if not updates:
                 time.sleep(1)
+                continue
+
+            if not isinstance(updates, list):
+                print(f"Ошибка: ожидался список обновлений, получено: {updates}")
+                time.sleep(2)
                 continue
 
             for update in updates:
