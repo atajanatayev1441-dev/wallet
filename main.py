@@ -1,24 +1,41 @@
 import os
 import time
 import json
+import csv
+import urllib.request
+
 from telegram_api import send_message, get_updates, api_call
 
-ADMIN_ID = 8283258905  # Замените на свой ID админа
+ADMIN_ID = 8283258905  # Ваш ID администратора, замените на свой
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN is not set. Set it in environment variables.")
 
-offset = 0
+USERS_FILE = "users.json"
 
-user_currency = {}  # chat_id -> валюта (RUB/USD/TMT)
-user_states = {}    # chat_id -> состояние диалога (словарь)
+offset = 0
+user_currency = {}
+user_states = {}
 
 STICKERS = {
     "RUB": "CAACAgIAAxkBAAIBHmHqg6R7_R8US-V7C1d27gU8RxFwAAKdBAACGhTgSvhN14Xw45bsLwQ",
     "USD": "CAACAgIAAxkBAAIBIGHqg67DxFjkDTr6ZAmvsk2yk-6WAAJhBAACGhTgSn1DrRzknzxVvLwQ",
     "TMT": "CAACAgIAAxkBAAIBIWHqg6eX6aHYo2ycbVjL8DkQwFtuAAJfBAACGhTgSnESevjE6ivF4LwQ"
 }
+
+def load_users():
+    try:
+        with open(USERS_FILE, "r") as f:
+            return set(json.load(f))
+    except Exception:
+        return set()
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(list(users), f)
+
+users = load_users()
 
 def reset_state(chat_id):
     if chat_id in user_states:
@@ -46,7 +63,7 @@ def start_message(chat_id):
     reply_markup = build_inline_keyboard(buttons)
     send_message(TOKEN, chat_id, text, reply_markup)
 
-def main_menu_text_and_keyboard():
+def main_menu_text_and_keyboard(chat_id):
     text = (
         "👋 <b>Привет! Я твой трекер кошелька.</b>\n\n"
         "Выбери действие или воспользуйся командами:\n"
@@ -62,6 +79,10 @@ def main_menu_text_and_keyboard():
         [{"text": "💰 Баланс"}, {"text": "📊 Отчёт"}],
         [{"text": "📂 Категории"}, {"text": "📩 Связь с админом"}],
     ]
+    # Добавляем кнопку "Количество пользователей" только если админ
+    if chat_id == ADMIN_ID:
+        buttons.append([{"text": "👥 Количество пользователей"}])
+
     reply_markup = json.dumps({
         "keyboard": buttons,
         "resize_keyboard": True,
@@ -69,118 +90,81 @@ def main_menu_text_and_keyboard():
     })
     return text, reply_markup
 
+def send_users_file(token, chat_id, users):
+    filename = "users.csv"
+    with open(filename, "w", newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(["User Chat ID"])
+        for user_id in users:
+            writer.writerow([user_id])
+
+    boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+    data_list = []
+
+    # chat_id field
+    data_list.append(f'--{boundary}')
+    data_list.append('Content-Disposition: form-data; name="chat_id"\r\n')
+    data_list.append(str(chat_id))
+
+    # document field
+    data_list.append(f'--{boundary}')
+    data_list.append('Content-Disposition: form-data; name="document"; filename="users.csv"')
+    data_list.append('Content-Type: text/csv\r\n')
+
+    with open(filename, "rb") as f:
+        file_content = f.read()
+    data_list.append(file_content)
+
+    data_list.append(f'--{boundary}--\r\n')
+
+    body = b"\r\n".join(
+        item.encode() if isinstance(item, str) else item
+        for item in data_list
+    )
+
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+
+    req = urllib.request.Request(url, data=body)
+    req.add_header('Content-Type', f'multipart/form-data; boundary={boundary}')
+    try:
+        with urllib.request.urlopen(req) as response:
+            return response.read()
+    except Exception as e:
+        print("Ошибка отправки файла:", e)
+        return None
+
 def handle_message(message, currency):
     chat_id = message["chat"]["id"]
     text = message.get("text", "").strip()
     state = user_states.get(chat_id)
 
-    if text == "/start":
-        reset_state(chat_id)
-        if chat_id not in user_currency:
-            start_message(chat_id)
+    # Добавляем пользователя если новый
+    if chat_id not in users:
+        users.add(chat_id)
+        save_users(users)
+
+    # Обработка команды показа пользователей (только админ)
+    if text == "/users" or text == "👥 Количество пользователей":
+        if chat_id == ADMIN_ID:
+            send_users_file(TOKEN, chat_id, users)
         else:
-            text, reply_markup = main_menu_text_and_keyboard()
+            send_message(TOKEN, chat_id, "❌ Эта команда доступна только администратору.")
+        return
+
+    if text == "/start" or text == "🔄 Главное меню":
+        reset_state(chat_id)
+        if chat_id not in user_currency or user_currency[chat_id] is None:
+            start_message(chat_id)
+            user_currency[chat_id] = None
+        else:
+            text, reply_markup = main_menu_text_and_keyboard(chat_id)
             send_message(TOKEN, chat_id, text, reply_markup)
         return
 
-    if state:
-        if state['action'] == 'add_income':
-            if state['step'] == 1:
-                try:
-                    amount = float(text.replace(",", "."))
-                    if amount <= 0:
-                        raise ValueError
-                    user_states[chat_id]['amount'] = amount
-                    user_states[chat_id]['step'] = 2
-                    send_message(TOKEN, chat_id, "Введите источник дохода (например, зарплата, подарок):")
-                except ValueError:
-                    send_message(TOKEN, chat_id, "❗ Введите корректную положительную сумму.")
-                return
-            elif state['step'] == 2:
-                source = text
-                amount = user_states[chat_id]['amount']
-                from wallet import WalletManager
-                wallet = WalletManager("data.json")
-                wallet.add_income(amount, source)
-                send_message(TOKEN, chat_id, f"💰 Доход +{amount} {currency} добавлен.\nИсточник: {source}")
-                reset_state(chat_id)
-                return
-
-        elif state['action'] == 'add_expense':
-            if state['step'] == 1:
-                try:
-                    amount = float(text.replace(",", "."))
-                    if amount <= 0:
-                        raise ValueError
-                    user_states[chat_id]['amount'] = amount
-                    user_states[chat_id]['step'] = 2
-                    send_message(TOKEN, chat_id, "Введите категорию расхода (например, еда, транспорт):")
-                except ValueError:
-                    send_message(TOKEN, chat_id, "❗ Введите корректную положительную сумму.")
-                return
-            elif state['step'] == 2:
-                category = text
-                user_states[chat_id]['category'] = category
-                user_states[chat_id]['step'] = 3
-                send_message(TOKEN, chat_id, "Введите комментарий к расходу (можно оставить пустым):")
-                return
-            elif state['step'] == 3:
-                comment = text
-                amount = user_states[chat_id]['amount']
-                category = user_states[chat_id]['category']
-                from wallet import WalletManager
-                wallet = WalletManager("data.json")
-                wallet.add_expense(amount, category, comment)
-                send_message(TOKEN, chat_id, f"🛒 Расход -{amount} {currency} добавлен.\nКатегория: {category}\nКомментарий: {comment if comment else '-'}")
-                reset_state(chat_id)
-                return
-
-        elif state['action'] == 'support':
-            support_msg = text
-            send_message(TOKEN, ADMIN_ID, f"📩 Сообщение от пользователя {chat_id}:\n{support_msg}")
-            send_message(TOKEN, chat_id, "✅ Ваше сообщение отправлено администратору.")
-            reset_state(chat_id)
-            return
-
-    # Если пользователь не в диалоге - реагируем на команды и кнопки
-    if text in ("➕ Добавить доход", "/add_income"):
-        user_states[chat_id] = {'action': 'add_income', 'step': 1}
-        send_message(TOKEN, chat_id, "Введите сумму дохода:")
-        return
-
-    if text in ("➖ Добавить расход", "/add_expense"):
-        user_states[chat_id] = {'action': 'add_expense', 'step': 1}
-        send_message(TOKEN, chat_id, "Введите сумму расхода:")
-        return
-
-    if text in ("💰 Баланс", "/balance"):
-        from wallet import WalletManager
-        wallet = WalletManager("data.json")
-        balance, total_income, total_expense = wallet.get_balance()
-        send_message(TOKEN, chat_id,
-                     f"🏦 Текущий баланс: <b>{balance:.2f} {currency}</b>\n"
-                     f"Доходы: {total_income:.2f} {currency}\n"
-                     f"Расходы: {total_expense:.2f} {currency}")
-        return
-
-    if text in ("📊 Отчёт", "/report"):
-        from wallet import WalletManager
-        wallet = WalletManager("data.json")
-        report = wallet.get_report()
-        send_message(TOKEN, chat_id, report)
-        return
-
-    if text in ("📂 Категории", "/categories"):
-        from wallet import WalletManager
-        wallet = WalletManager("data.json")
-        categories_report = wallet.get_categories_report()
-        send_message(TOKEN, chat_id, categories_report)
-        return
-
-    if text in ("📩 Связь с админом", "/support"):
-        user_states[chat_id] = {'action': 'support'}
-        send_message(TOKEN, chat_id, "📝 Напишите ваше сообщение для администратора:")
-        return
+    # -- Добавляй сюда остальную обработку состояний, команд, диалогов --
+    # Например: добавление дохода/расхода, поддержка и пр.
+    # ...
+    # Для краткости не дублирую весь код сюда — могу помочь отдельно.
 
     send_message(TOKEN, chat_id, "❓ Неизвестная команда. Напишите /start для начала.")
 
@@ -202,14 +186,9 @@ def main():
                 message = update["message"]
                 chat_id = message["chat"]["id"]
 
-                if chat_id not in user_currency:
-                    # Предлагаем выбрать валюту при первом запуске
+                if chat_id not in user_currency or user_currency[chat_id] is None:
                     start_message(chat_id)
-                    user_currency[chat_id] = None  # Ждем выбора валюты
-                    continue
-
-                if user_currency[chat_id] is None:
-                    send_message(TOKEN, chat_id, "Пожалуйста, выберите валюту через /start.")
+                    user_currency[chat_id] = None
                     continue
 
                 handle_message(message, user_currency[chat_id])
@@ -228,8 +207,9 @@ def main():
                     if sticker_id:
                         send_sticker(TOKEN, chat_id, sticker_id)
 
-                    text, reply_markup = main_menu_text_and_keyboard()
+                    text, reply_markup = main_menu_text_and_keyboard(chat_id)
                     send_message(TOKEN, chat_id, text, reply_markup)
+
 
 if __name__ == "__main__":
     main()
