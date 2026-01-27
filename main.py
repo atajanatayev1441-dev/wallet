@@ -1,354 +1,436 @@
-import time
 import json
-import datetime
+import os
+import time
 from telegram_api import get_updates, send_message, answer_callback_query
 
-TOKEN = "8263345320:AAFr3_tHDhX_x0eNywQkq-SCXBTQG7avYvk"
-ADMIN_ID = 8283258905  # Ваш ID
+TOKEN = os.getenv("BOT_TOKEN")  # Установи через переменную окружения
+ADMIN_ID = 123456789  # Заменить на свой Telegram ID администратора
 
-USERS_FILE = "users.json"
-DATA_FILE = "data.json"
+DATA_DIR = "data"
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+TX_FILE = os.path.join(DATA_DIR, "transactions.json")
+STATE_FILE = os.path.join(DATA_DIR, "states.json")
 
-user_states = {}
-users = {}
-data = {}
+# Создаём папку и файлы, если их нет
+def ensure_files():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    for f in [USERS_FILE, TX_FILE, STATE_FILE]:
+        if not os.path.exists(f):
+            with open(f, "w", encoding="utf-8") as file:
+                if f == USERS_FILE or f == STATE_FILE:
+                    file.write("{}")  # словарь
+                else:
+                    file.write("[]")  # список для транзакций
 
-def load_json(filename):
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
+def load_json(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def save_json(filename, content):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(content, f, ensure_ascii=False, indent=2)
+def save_json(file_path, data):
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def init_data():
-    global users, data
+# --- Работа с пользователями и состояниями ---
+
+def get_user(chat_id):
     users = load_json(USERS_FILE)
-    data = load_json(DATA_FILE)
-    if "currencies" not in data:
-        data["currencies"] = {}
-    if "categories" not in data:
-        data["categories"] = {}
-    if "records" not in data:
-        data["records"] = {}
+    return users.get(str(chat_id))
 
-def save_all():
+def save_user(chat_id, user_data):
+    users = load_json(USERS_FILE)
+    users[str(chat_id)] = user_data
     save_json(USERS_FILE, users)
-    save_json(DATA_FILE, data)
 
-def keyboard_inline(buttons):
-    return {"inline_keyboard": buttons}
+def get_state(chat_id):
+    states = load_json(STATE_FILE)
+    return states.get(str(chat_id), {})
 
-def main_menu_keyboard(chat_id):
-    kb = [
-        [{"text": "➕ Добавить доход", "callback_data": "add_income"}],
-        [{"text": "➖ Добавить расход", "callback_data": "add_expense"}],
-        [{"text": "📊 Отчёты и анализ", "callback_data": "reports"}],
-        [{"text": "✉️ Связь с админом", "callback_data": "contact_admin"}]
-    ]
-    if chat_id == ADMIN_ID:
-        kb.append([{"text": "👥 Пользователи", "callback_data": "users_list"}])
-    return keyboard_inline(kb)
+def save_state(chat_id, state_data):
+    states = load_json(STATE_FILE)
+    states[str(chat_id)] = state_data
+    save_json(STATE_FILE, states)
 
-def cancel_keyboard():
-    return keyboard_inline([[{"text": "❌ Отмена", "callback_data": "cancel"}]])
+def clear_state(chat_id):
+    states = load_json(STATE_FILE)
+    if str(chat_id) in states:
+        del states[str(chat_id)]
+        save_json(STATE_FILE, states)
 
-def back_to_menu_keyboard():
-    return keyboard_inline([[{"text": "⬅️ Вернуться в меню", "callback_data": "back_to_menu"}]])
+# --- Транзакции ---
 
-def categories_keyboard(cat_list):
-    kb = [[{"text": c, "callback_data": f"cat_{c}"}] for c in cat_list]
-    kb.append([{"text": "➕ Добавить категорию", "callback_data": "add_category"}])
-    kb.append([{"text": "❌ Отмена", "callback_data": "cancel"}])
-    return keyboard_inline(kb)
-
-def currency_keyboard():
-    kb = [[{"text": cur, "callback_data": f"currency_{cur}"}] for cur in ["RUB", "TMT", "USD"]]
-    return keyboard_inline(kb)
-
-def save_user_currency(chat_id, currency):
-    data["currencies"][str(chat_id)] = currency
-    save_json(DATA_FILE, data)
-
-def get_user_currency(chat_id):
-    return data["currencies"].get(str(chat_id), "RUB")
-
-def get_user_categories(chat_id, cat_type):
-    key = f"{chat_id}_{cat_type}"
-    if key not in data["categories"]:
-        data["categories"][key] = ["Общее"]
-        save_json(DATA_FILE, data)
-    return data["categories"][key]
-
-def add_user_category(chat_id, cat_type, category_name):
-    key = f"{chat_id}_{cat_type}"
-    if key not in data["categories"]:
-        data["categories"][key] = []
-    if category_name not in data["categories"][key]:
-        data["categories"][key].append(category_name)
-        save_json(DATA_FILE, data)
-
-def add_record(chat_id, rec_type, amount, category, comment=""):
-    if str(chat_id) not in data["records"]:
-        data["records"][str(chat_id)] = []
-    data["records"][str(chat_id)].append({
-        "type": rec_type,
+def add_transaction(chat_id, kind, amount, category, currency):
+    txs = load_json(TX_FILE)
+    txs.append({
+        "user_id": chat_id,
+        "kind": kind,  # income/expense
         "amount": amount,
         "category": category,
-        "comment": comment,
+        "currency": currency,
         "timestamp": int(time.time())
     })
-    save_json(DATA_FILE, data)
+    save_json(TX_FILE, txs)
 
-def format_report(chat_id, period="all", rec_type=None):
-    now = int(time.time())
-    start_ts = 0
-    if period == "day":
-        start_ts = now - 86400
-    elif period == "week":
-        start_ts = now - 7 * 86400
-    elif period == "month":
-        start_ts = now - 30 * 86400
-    records = data.get("records", {}).get(str(chat_id), [])
-    filtered = [r for r in records if r["timestamp"] >= start_ts]
-    if rec_type:
-        filtered = [r for r in filtered if r["type"] == rec_type]
-    if not filtered:
-        return "Нет данных для выбранного периода."
+def get_user_transactions(chat_id):
+    txs = load_json(TX_FILE)
+    return [tx for tx in txs if tx["user_id"] == chat_id]
 
-    sums = {}
-    total = 0
-    for r in filtered:
-        cat = r["category"]
-        sums[cat] = sums.get(cat, 0) + float(r["amount"])
-        total += float(r["amount"])
+# --- Категории ---
 
-    lines = [f"<b>Отчёт за {period} ({'доходы' if rec_type=='income' else 'расходы' if rec_type=='expense' else 'все записи'}):</b>"]
-    for cat, amount in sorted(sums.items(), key=lambda x: x[1], reverse=True):
-        lines.append(f"{cat}: {amount:.2f} {get_user_currency(chat_id)}")
-    lines.append(f"\n<b>Итого:</b> {total:.2f} {get_user_currency(chat_id)}")
-    return "\n".join(lines)
+def get_categories(chat_id):
+    user = get_user(chat_id)
+    if not user:
+        return {"income": [], "expense": []}
+    return user.get("categories", {"income": [], "expense": []})
 
-def handle_start(chat_id):
-    text = ("Привет! Добро пожаловать в бот учёта доходов и расходов.\n\n"
-            "Пожалуйста, выберите валюту для работы:")
-    send_message(TOKEN, chat_id, text, reply_markup=currency_keyboard())
-    user_states[str(chat_id)] = {"action": "choosing_currency"}
+def add_category(chat_id, kind, name):
+    user = get_user(chat_id) or {"categories": {"income": [], "expense": []}, "currency": "RUB"}
+    if kind not in user["categories"]:
+        user["categories"][kind] = []
+    if name not in user["categories"][kind]:
+        user["categories"][kind].append(name)
+    save_user(chat_id, user)
 
-def handle_callback(update):
-    callback = update.get("callback_query")
-    if not callback:
-        return
+# --- Кнопки ---
+
+def make_keyboard(buttons, row_width=2):
+    keyboard = []
+    row = []
+    for i, (text, callback_data) in enumerate(buttons, 1):
+        row.append({"text": text, "callback_data": callback_data})
+        if i % row_width == 0:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    return {"inline_keyboard": keyboard}
+
+def main_menu_keyboard(is_admin=False):
+    buttons = [
+        ("➕ Добавить доход", "add_income"),
+        ("➖ Добавить расход", "add_expense"),
+        ("📊 Показать отчёт", "show_report"),
+        ("➕ Добавить категорию дохода", "add_cat_income"),
+        ("➕ Добавить категорию расхода", "add_cat_expense"),
+        ("💬 Связь с админом", "contact_admin"),
+    ]
+    if is_admin:
+        buttons.append(("👥 Пользователи", "admin_users"))
+        buttons.append(("📢 Рассылка", "admin_broadcast"))
+    return make_keyboard(buttons, row_width=2)
+
+def currency_keyboard():
+    buttons = [
+        ("🇷🇺 RUB", "cur_RUB"),
+        ("🇹🇲 TMT", "cur_TMT"),
+        ("🇺🇸 USD", "cur_USD"),
+    ]
+    return make_keyboard(buttons, row_width=3)
+
+def cancel_button():
+    return make_keyboard([("❌ Отмена", "cancel")], row_width=1)
+
+def back_to_menu_button():
+    return make_keyboard([("⬅️ Вернуться в меню", "back_menu")], row_width=1)
+
+# --- Логика обработки сообщений и callback ---
+
+def start_handler(chat_id):
+    user = get_user(chat_id)
+    if user and user.get("currency"):
+        text = f"С возвращением! Валюта: {user['currency']}\nВыберите действие:"
+        is_admin = (chat_id == ADMIN_ID)
+        send_message(TOKEN, chat_id, text, main_menu_keyboard(is_admin))
+    else:
+        send_message(TOKEN, chat_id, "Выберите валюту для учёта:", currency_keyboard())
+
+def handle_callback(callback):
     chat_id = callback["message"]["chat"]["id"]
-    data_cb = callback["data"]
-    callback_id = callback["id"]
+    data = callback["data"]
+    is_admin = (chat_id == ADMIN_ID)
 
-    if data_cb == "cancel":
-        user_states.pop(str(chat_id), None)
-        send_message(TOKEN, chat_id, "Действие отменено.", reply_markup=main_menu_keyboard(chat_id))
-        answer_callback_query(TOKEN, callback_id, "Отменено")
-        return
-    if data_cb == "back_to_menu":
-        user_states.pop(str(chat_id), None)
-        send_message(TOKEN, chat_id, "Возвращаемся в меню.", reply_markup=main_menu_keyboard(chat_id))
-        answer_callback_query(TOKEN, callback_id)
+    if data == "cancel":
+        clear_state(chat_id)
+        send_message(TOKEN, chat_id, "Действие отменено.", main_menu_keyboard(is_admin))
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-    if data_cb.startswith("currency_"):
-        currency = data_cb.split("_")[1]
-        save_user_currency(chat_id, currency)
-        send_message(TOKEN, chat_id, f"Валюта установлена: <b>{currency}</b>", reply_markup=main_menu_keyboard(chat_id))
-        user_states.pop(str(chat_id), None)
-        answer_callback_query(TOKEN, callback_id)
+    if data == "back_menu":
+        clear_state(chat_id)
+        send_message(TOKEN, chat_id, "Главное меню:", main_menu_keyboard(is_admin))
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-    if data_cb == "add_income":
-        user_states[str(chat_id)] = {"action": "input_income_amount"}
-        send_message(TOKEN, chat_id, "Введите сумму дохода:", reply_markup=cancel_keyboard())
-        answer_callback_query(TOKEN, callback_id)
-        return
-    if data_cb == "add_expense":
-        user_states[str(chat_id)] = {"action": "input_expense_amount"}
-        send_message(TOKEN, chat_id, "Введите сумму расхода:", reply_markup=cancel_keyboard())
-        answer_callback_query(TOKEN, callback_id)
-        return
-    if data_cb == "reports":
-        kb = keyboard_inline([
-            [{"text": "📅 Доходы за день", "callback_data": "report_income_day"}],
-            [{"text": "📅 Расходы за день", "callback_data": "report_expense_day"}],
-            [{"text": "📅 Доходы за неделю", "callback_data": "report_income_week"}],
-            [{"text": "📅 Расходы за неделю", "callback_data": "report_expense_week"}],
-            [{"text": "📅 Доходы за месяц", "callback_data": "report_income_month"}],
-            [{"text": "📅 Расходы за месяц", "callback_data": "report_expense_month"}],
-            [{"text": "🧾 Все записи", "callback_data": "report_all"}],
-            [{"text": "⬅️ Вернуться в меню", "callback_data": "back_to_menu"}],
-        ])
-        send_message(TOKEN, chat_id, "Выберите отчёт:", reply_markup=kb)
-        answer_callback_query(TOKEN, callback_id)
-        return
-    if data_cb == "contact_admin":
-        user_states[str(chat_id)] = {"action": "contact_admin"}
-        send_message(TOKEN, chat_id, "Напишите сообщение для администратора:", reply_markup=cancel_keyboard())
-        answer_callback_query(TOKEN, callback_id)
-        return
-    if data_cb == "users_list" and chat_id == ADMIN_ID:
-        send_message(TOKEN, chat_id, f"Всего пользователей: {len(users)}", reply_markup=back_to_menu_keyboard())
-        answer_callback_query(TOKEN, callback_id)
+    if data.startswith("cur_"):
+        currency = data.split("_")[1]
+        user = get_user(chat_id) or {}
+        user["currency"] = currency
+        if "categories" not in user:
+            user["categories"] = {"income": [], "expense": []}
+        save_user(chat_id, user)
+        send_message(TOKEN, chat_id, f"Валюта установлена: {currency}\nВыберите действие:", main_menu_keyboard(is_admin))
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-    if data_cb.startswith("cat_"):
-        category = data_cb[4:]
-        state = user_states.get(str(chat_id), {})
-        if not state:
-            send_message(TOKEN, chat_id, "Ошибка. Начните заново.", reply_markup=main_menu_keyboard(chat_id))
-            answer_callback_query(TOKEN, callback_id)
-            return
-        action = state.get("action")
-        amount = state.get("amount")
-        if action == "choose_income_category":
-            add_record(chat_id, "income", amount, category)
-            send_message(TOKEN, chat_id, f"✅ Доход {amount} {get_user_currency(chat_id)} в категории «{category}» добавлен.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
-        elif action == "choose_expense_category":
-            add_record(chat_id, "expense", amount, category)
-            send_message(TOKEN, chat_id, f"✅ Расход {amount} {get_user_currency(chat_id)} в категории «{category}» добавлен.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
-        else:
-            send_message(TOKEN, chat_id, "Ошибка. Начните заново.", reply_markup=main_menu_keyboard(chat_id))
-        answer_callback_query(TOKEN, callback_id)
+    state = get_state(chat_id)
+
+    # Добавление дохода
+    if data == "add_income":
+        state.update({"action": "adding_income", "step": "amount"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Введите сумму дохода:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-    if data_cb == "add_category":
-        state = user_states.get(str(chat_id), {})
-        if not state or "cat_type" not in state:
-            send_message(TOKEN, chat_id, "Ошибка. Начните заново.", reply_markup=main_menu_keyboard(chat_id))
-            answer_callback_query(TOKEN, callback_id)
-            return
-        user_states[str(chat_id)] = {"action": "adding_category", "cat_type": state["cat_type"]}
-        send_message(TOKEN, chat_id, "Введите название новой категории:", reply_markup=cancel_keyboard())
-        answer_callback_query(TOKEN, callback_id)
+    # Добавление расхода
+    if data == "add_expense":
+        state.update({"action": "adding_expense", "step": "amount"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Введите сумму расхода:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-    if data_cb.startswith("report_"):
-        rep = data_cb.split("_")
-        if len(rep) >= 2:
-            if rep[1] == "all":
-                text = format_report(chat_id, period="all")
-            else:
-                rec_type = "income" if rep[1] == "income" else "expense" if rep[1] == "expense" else None
-                period = rep[2] if len(rep) > 2 else "all"
-                text = format_report(chat_id, period=period, rec_type=rec_type)
-            send_message(TOKEN, chat_id, text, reply_markup=back_to_menu_keyboard())
-        else:
-            send_message(TOKEN, chat_id, "Неверная команда отчёта.", reply_markup=back_to_menu_keyboard())
-        answer_callback_query(TOKEN, callback_id)
+    # Добавление категории дохода
+    if data == "add_cat_income":
+        state.update({"action": "adding_category", "kind": "income", "step": "name"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Введите название новой категории дохода:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
         return
 
-def handle_message(update):
-    message = update.get("message")
-    if not message:
+    # Добавление категории расхода
+    if data == "add_cat_expense":
+        state.update({"action": "adding_category", "kind": "expense", "step": "name"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Введите название новой категории расхода:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
         return
+
+    # Показать отчёт
+    if data == "show_report":
+        show_report(chat_id)
+        answer_callback_query(TOKEN, callback["id"])
+        return
+
+    # Связь с админом
+    if data == "contact_admin":
+        state.update({"action": "contacting_admin"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Напишите сообщение администратору:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
+        return
+
+    # Админ: показать пользователей
+    if is_admin and data == "admin_users":
+        users = load_json(USERS_FILE)
+        count = len(users)
+        send_message(TOKEN, chat_id, f"Всего пользователей: {count}", back_to_menu_button())
+        answer_callback_query(TOKEN, callback["id"])
+        return
+
+    # Админ: рассылка
+    if is_admin and data == "admin_broadcast":
+        state.update({"action": "admin_broadcast"})
+        save_state(chat_id, state)
+        send_message(TOKEN, chat_id, "Напишите сообщение для рассылки всем пользователям:", cancel_button())
+        answer_callback_query(TOKEN, callback["id"])
+        return
+
+def handle_message(message):
     chat_id = message["chat"]["id"]
-    text = message.get("text", "").strip()
+    text = message.get("text", "")
+    is_admin = (chat_id == ADMIN_ID)
+    state = get_state(chat_id)
 
-    if str(chat_id) not in users:
-        users[str(chat_id)] = {
-            "id": chat_id,
-            "username": message["from"].get("username", ""),
-            "first_name": message["from"].get("first_name", ""),
-        }
-        save_json(USERS_FILE, users)
+    # Если в процессе какого-то действия
+    if state:
+        action = state.get("action")
+        step = state.get("step")
 
-    state = user_states.get(str(chat_id), {})
+        if action == "adding_income":
+            if step == "amount":
+                if not is_valid_amount(text):
+                    send_message(TOKEN, chat_id, "Введите корректную сумму (например, 1000.50):", cancel_button())
+                    return
+                state["amount"] = float(text)
+                state["step"] = "category"
+                save_state(chat_id, state)
 
-    if state.get("action") == "choosing_currency":
-        send_message(TOKEN, chat_id, "Пожалуйста, выберите валюту с помощью кнопок ниже.", reply_markup=currency_keyboard())
-        return
+                categories = get_categories(chat_id).get("income", [])
+                if not categories:
+                    send_message(TOKEN, chat_id, "Категории доходов отсутствуют. Введите новую категорию дохода:", cancel_button())
+                    state["action"] = "adding_category"
+                    state["kind"] = "income"
+                    state["step"] = "name"
+                    save_state(chat_id, state)
+                else:
+                    kb = make_keyboard([(c, f"cat_income_{c}") for c in categories], row_width=2)
+                    kb["inline_keyboard"].append([{"text": "➕ Добавить категорию", "callback_data": "add_cat_income"}])
+                    kb["inline_keyboard"].append([{"text": "❌ Отмена", "callback_data": "cancel"}])
+                    send_message(TOKEN, chat_id, "Выберите категорию дохода или добавьте новую:", kb)
+                return
 
-    if state.get("action") == "input_income_amount":
-        if text == "❌ Отмена":
-            send_message(TOKEN, chat_id, "Добавление дохода отменено.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
+            if step == "category":
+                # Категории выбираются через callback, не текстом
+                send_message(TOKEN, chat_id, "Пожалуйста, выберите категорию с помощью кнопок ниже.", cancel_button())
+                return
+
+        if action == "adding_expense":
+            if step == "amount":
+                if not is_valid_amount(text):
+                    send_message(TOKEN, chat_id, "Введите корректную сумму (например, 1000.50):", cancel_button())
+                    return
+                state["amount"] = float(text)
+                state["step"] = "category"
+                save_state(chat_id, state)
+
+                categories = get_categories(chat_id).get("expense", [])
+                if not categories:
+                    send_message(TOKEN, chat_id, "Категории расходов отсутствуют. Введите новую категорию расхода:", cancel_button())
+                    state["action"] = "adding_category"
+                    state["kind"] = "expense"
+                    state["step"] = "name"
+                    save_state(chat_id, state)
+                else:
+                    kb = make_keyboard([(c, f"cat_expense_{c}") for c in categories], row_width=2)
+                    kb["inline_keyboard"].append([{"text": "➕ Добавить категорию", "callback_data": "add_cat_expense"}])
+                    kb["inline_keyboard"].append([{"text": "❌ Отмена", "callback_data": "cancel"}])
+                    send_message(TOKEN, chat_id, "Выберите категорию расхода или добавьте новую:", kb)
+                return
+
+            if step == "category":
+                send_message(TOKEN, chat_id, "Пожалуйста, выберите категорию с помощью кнопок ниже.", cancel_button())
+                return
+
+        if action == "adding_category":
+            if step == "name":
+                name = text.strip()
+                if not name:
+                    send_message(TOKEN, chat_id, "Название категории не может быть пустым. Введите снова:", cancel_button())
+                    return
+                add_category(chat_id, state["kind"], name)
+                send_message(TOKEN, chat_id, f"Категория '{name}' добавлена.", back_to_menu_button())
+                clear_state(chat_id)
+                return
+
+        if action == "contacting_admin":
+            msg = text.strip()
+            if not msg:
+                send_message(TOKEN, chat_id, "Сообщение не может быть пустым. Попробуйте ещё раз:", cancel_button())
+                return
+            users = load_json(USERS_FILE)
+            user_info = users.get(str(chat_id), {})
+            user_name = user_info.get("first_name", "Пользователь")
+            admin_message = f"📩 <b>Сообщение от пользователя</b> <i>{user_name}</i> (id: {chat_id}):\n\n{msg}"
+            send_message(TOKEN, ADMIN_ID, admin_message)
+            send_message(TOKEN, chat_id, "Сообщение отправлено администратору.", back_to_menu_button())
+            clear_state(chat_id)
             return
-        try:
-            amount = float(text.replace(",", "."))
-            cats = get_user_categories(chat_id, "income")
-            user_states[str(chat_id)] = {"action": "choose_income_category", "amount": amount}
-            send_message(TOKEN, chat_id, "Выберите категорию дохода или добавьте новую:", reply_markup=categories_keyboard(cats))
-        except:
-            send_message(TOKEN, chat_id, "Введите корректное число или нажмите ❌ Отмена.", reply_markup=cancel_keyboard())
-        return
 
-    if state.get("action") == "input_expense_amount":
-        if text == "❌ Отмена":
-            send_message(TOKEN, chat_id, "Добавление расхода отменено.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
+        if action == "admin_broadcast" and is_admin:
+            msg = text.strip()
+            if not msg:
+                send_message(TOKEN, chat_id, "Сообщение не может быть пустым. Попробуйте ещё раз:", cancel_button())
+                return
+            users = load_json(USERS_FILE)
+            count = 0
+            for u in users.keys():
+                try:
+                    send_message(TOKEN, int(u), msg)
+                    count +=1
+                    time.sleep(0.1)
+                except:
+                    pass
+            send_message(TOKEN, chat_id, f"Рассылка выполнена. Отправлено {count} пользователям.", back_to_menu_button())
+            clear_state(chat_id)
             return
-        try:
-            amount = float(text.replace(",", "."))
-            cats = get_user_categories(chat_id, "expense")
-            user_states[str(chat_id)] = {"action": "choose_expense_category", "amount": amount}
-            send_message(TOKEN, chat_id, "Выберите категорию расхода или добавьте новую:", reply_markup=categories_keyboard(cats))
-        except:
-            send_message(TOKEN, chat_id, "Введите корректное число или нажмите ❌ Отмена.", reply_markup=cancel_keyboard())
-        return
 
-    if state.get("action") == "adding_category":
-        if text == "❌ Отмена":
-            send_message(TOKEN, chat_id, "Добавление категории отменено.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
-            return
-        cat_type = state.get("cat_type")
-        category_name = text.strip()
-        if not category_name:
-            send_message(TOKEN, chat_id, "Название категории не может быть пустым. Попробуйте снова или нажмите ❌ Отмена.", reply_markup=cancel_keyboard())
-            return
-        add_user_category(chat_id, cat_type, category_name)
-        send_message(TOKEN, chat_id, f"Категория «{category_name}» добавлена.", reply_markup=main_menu_keyboard(chat_id))
-        user_states.pop(str(chat_id), None)
-        return
+    # Обработка выбора категории (callback)
+    # Обрабатываем в handle_callback
 
-    if state.get("action") == "contact_admin":
-        if text == "❌ Отмена":
-            send_message(TOKEN, chat_id, "Отправка сообщения администратору отменена.", reply_markup=main_menu_keyboard(chat_id))
-            user_states.pop(str(chat_id), None)
-            return
-        admin_message = (
-            f"Сообщение от пользователя <b>{users.get(str(chat_id), {}).get('first_name', '')} "
-            f"(@{users.get(str(chat_id), {}).get('username', '')})</b>:\n\n{text}"
-        )
-        send_message(TOKEN, ADMIN_ID, admin_message)
-        send_message(TOKEN, chat_id, "Ваше сообщение отправлено администратору.", reply_markup=main_menu_keyboard(chat_id))
-        user_states.pop(str(chat_id), None)
-        return
-
-    # Команда /start
+    # Если не в процессе действий, реагируем на команды
     if text == "/start":
-        handle_start(chat_id)
+        start_handler(chat_id)
+    else:
+        send_message(TOKEN, chat_id, "Пожалуйста, используйте кнопки меню.", main_menu_keyboard(is_admin))
+
+def is_valid_amount(text):
+    try:
+        val = float(text.replace(",", "."))
+        return val > 0
+    except:
+        return False
+
+def show_report(chat_id):
+    txs = get_user_transactions(chat_id)
+    if not txs:
+        send_message(TOKEN, chat_id, "Нет данных для отчёта.", back_to_menu_button())
         return
 
-    # Если нет текущего действия — показать меню
-    if not state:
-        send_message(TOKEN, chat_id, "Выберите действие:", reply_markup=main_menu_keyboard(chat_id))
+    # Подсчёт доходов и расходов по категориям
+    income_sum = 0
+    expense_sum = 0
+    income_cats = {}
+    expense_cats = {}
+
+    user = get_user(chat_id)
+    currency = user.get("currency", "RUB")
+
+    for tx in txs:
+        if tx["kind"] == "income":
+            income_sum += tx["amount"]
+            income_cats[tx["category"]] = income_cats.get(tx["category"], 0) + tx["amount"]
+        else:
+            expense_sum += tx["amount"]
+            expense_cats[tx["category"]] = expense_cats.get(tx["category"], 0) + tx["amount"]
+
+    text = f"📊 <b>Отчёт по финансам</b>\nВалюта: {currency}\n\n"
+    text += f"💰 Доходы: {income_sum:.2f} {currency}\n"
+    text += f"💸 Расходы: {expense_sum:.2f} {currency}\n\n"
+
+    text += "📈 Доходы по категориям:\n"
+    if income_cats:
+        for cat, amt in income_cats.items():
+            text += f" - {cat}: {amt:.2f}\n"
+    else:
+        text += " - Нет данных\n"
+
+    text += "\n📉 Расходы по категориям:\n"
+    if expense_cats:
+        for cat, amt in expense_cats.items():
+            text += f" - {cat}: {amt:.2f}\n"
+    else:
+        text += " - Нет данных\n"
+
+    send_message(TOKEN, chat_id, text, back_to_menu_button())
+
+# --- Основной цикл ---
 
 def main():
-    init_data()
+    ensure_files()
     offset = 0
+    print("Бот запущен...")
     while True:
-        updates = get_updates(TOKEN, offset)
-        if not updates:
-            time.sleep(1)
-            continue
-        for update in updates:
-            offset = update["update_id"] + 1
-            if "callback_query" in update:
-                handle_callback(update)
-            elif "message" in update:
-                handle_message(update)
+        updates = get_updates(TOKEN, offset, timeout=15)
+        if updates and updates.get("ok"):
+            for update in updates["result"]:
+                offset = update["update_id"] + 1
+                if "message" in update:
+                    msg = update["message"]
+                    chat_id = msg["chat"]["id"]
+                    # Сохраняем пользователя при первом общении
+                    users = load_json(USERS_FILE)
+                    if str(chat_id) not in users:
+                        users[str(chat_id)] = {
+                            "first_name": msg["chat"].get("first_name", ""),
+                            "categories": {"income": [], "expense": []},
+                            "currency": None
+                        }
+                        save_json(USERS_FILE, users)
+                    handle_message(msg)
+                elif "callback_query" in update:
+                    handle_callback(update["callback_query"])
+        time.sleep(0.3)
 
 if __name__ == "__main__":
     main()
-
