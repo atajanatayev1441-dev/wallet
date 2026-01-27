@@ -7,7 +7,15 @@ API_URL = "https://api.telegram.org/bot{token}/{method}"
 def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
     if params:
-        query_string = urllib.parse.urlencode(params)
+        # reply_markup должен быть JSON-строкой, не urlencode
+        # Поэтому отдельно обрабатываем reply_markup
+        params_for_url = {}
+        for key, value in params.items():
+            if key == "reply_markup" and value is not None:
+                params_for_url[key] = value  # уже json.dumps
+            else:
+                params_for_url[key] = str(value)
+        query_string = urllib.parse.urlencode(params_for_url)
         url = f"{url}?{query_string}"
         data = None
     else:
@@ -33,11 +41,13 @@ def get_updates(token, offset=0, timeout=10):
         return result.get("result", [])
     return []
 
-def send_message(token, chat_id, text):
+def send_message(token, chat_id, text, reply_markup=None):
     params = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML"
     }
+    if reply_markup:
+        params["reply_markup"] = reply_markup
     result = api_call(token, "sendMessage", params)
     return result
