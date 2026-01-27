@@ -1,13 +1,17 @@
-import urllib.request
+ import urllib.request
 import urllib.parse
 import json
 
 API_URL = "https://api.telegram.org/bot{token}/{method}"
 
-def api_call(token, method, params=None):
+def api_call(token, method, params=None, is_post=True):
     url = API_URL.format(token=token, method=method)
     if params is not None:
-        data = urllib.parse.urlencode(params).encode()
+        if is_post:
+            data = urllib.parse.urlencode(params).encode()
+        else:
+            url += "?" + urllib.parse.urlencode(params)
+            data = None
     else:
         data = None
 
@@ -24,10 +28,7 @@ def get_updates(token, offset=0, timeout=10):
     params = {"timeout": timeout}
     if offset:
         params["offset"] = offset
-    result = api_call(token, "getUpdates", params)
-    if result and result.get("ok"):
-        return result.get("result", [])
-    return []
+    return api_call(token, "getUpdates", params, is_post=False)
 
 def send_message(token, chat_id, text, reply_markup=None):
     params = {
@@ -37,13 +38,11 @@ def send_message(token, chat_id, text, reply_markup=None):
     }
     if reply_markup:
         params["reply_markup"] = reply_markup
-    result = api_call(token, "sendMessage", params)
-    return result
+    return api_call(token, "sendMessage", params)
 
 def send_sticker(token, chat_id, sticker_id):
     params = {
         "chat_id": chat_id,
         "sticker": sticker_id
     }
-    result = api_call(token, "sendSticker", params)
-    return result
+    return api_call(token, "sendSticker", params)
