@@ -7,9 +7,8 @@ from telegram_api import get_updates, send_message
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 8283258905  # <-- ТУТ ВПИШИ СВОЙ ID
 DATA_FILE = "data.json"
-# ========================
 
-# ====== СОСТОЯНИЯ =======
+# ====== СОСТОЯНИЯ ======
 STATE_NONE = "none"
 STATE_WAIT_INCOME_SUM = "wait_income_sum"
 STATE_WAIT_INCOME_CAT = "wait_income_cat"
@@ -18,27 +17,43 @@ STATE_WAIT_EXPENSE_CAT = "wait_expense_cat"
 STATE_SUPPORT = "support"
 STATE_BROADCAST = "broadcast"
 STATE_ADD_CAT = "add_category"
+STATE_CHOOSE_CURRENCY = "choose_currency"
+STATE_REPORT_PERIOD = "report_period"
 
-# ====== ГЛОБАЛЬНЫЕ =======
+# ====== ГЛОБАЛЬНЫЕ ======
 user_states = {}
 user_temp = {}
 users = set()
 data = {}
 
-# ====== ИНИЦИАЛИЗАЦИЯ ДАННЫХ =======
+# ====== ВАЛЮТЫ ======
+CURRENCIES = {
+    "RUB": "₽",
+    "USD": "$",
+    "TMT": "T"
+}
+currency_user = {}
+
+# ====== ЗАГРУЗКА/СОХРАНЕНИЕ ДАННЫХ ======
 def load_data():
     global data
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
     else:
-        data = {"users": {}, "categories": {"income": ["Зарплата", "Подарок", "Другое"], "expense": ["Еда", "Транспорт", "Развлечения", "Другое"]}}
+        data = {
+            "users": {},
+            "categories": {
+                "income": ["Зарплата", "Подарок", "Другое"],
+                "expense": ["Еда", "Транспорт", "Развлечения", "Другое"]
+            }
+        }
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ====== КНОПКИ =======
+# ====== КНОПКИ ======
 def keyboard_main(is_admin=False):
     kb = {
         "keyboard": [
@@ -69,26 +84,18 @@ def keyboard_report_period():
     }
     return kb
 
-# ====== ВАЛЮТЫ + СТИКЕРЫ =======
-CURRENCIES = {
-    "RUB": "₽",
-    "USD": "$",
-    "TMT": "T"
-}
-currency_user = {}
-
 def get_currency_keyboard():
     kb = {
         "keyboard": [
-            [f"🇷🇺 RUB {CURRENCIES['RUB']}"],
-            [f"🇺🇸 USD {CURRENCIES['USD']}"],
-            [f"🇹🇲 TMT {CURRENCIES['TMT']}"]
+            ["🇷🇺 RUB ₽"],
+            ["🇺🇸 USD $"],
+            ["🇹🇲 TMT T"]
         ],
         "resize_keyboard": True
     }
     return kb
 
-# ====== ОСНОВНОЙ ЦИКЛ =======
+# ====== ОСНОВНОЙ ЦИКЛ ======
 def main():
     load_data()
     offset = 0
@@ -107,20 +114,20 @@ def main():
             is_admin = chat_id == ADMIN_ID
             state = user_states.get(chat_id, STATE_NONE)
 
-            # --- Если пользователь новый, установим валюту ---
+            # Установить валюту по умолчанию, если не выбрана
             if chat_id not in currency_user:
                 currency_user[chat_id] = None
 
-            # --- Команда /start ---
+            # --- /start ---
             if text == "/start":
-                user_states[chat_id] = "choose_currency"
+                user_states[chat_id] = STATE_CHOOSE_CURRENCY
                 send_message(TOKEN, chat_id,
-                    "👋 <b>Добро пожаловать!</b>\nВыберите валюту для учета:",
-                    get_currency_keyboard())
+                             "👋 <b>Добро пожаловать!</b>\nВыберите валюту для учета:",
+                             get_currency_keyboard())
                 continue
 
             # --- Выбор валюты ---
-            if state == "choose_currency":
+            if state == STATE_CHOOSE_CURRENCY:
                 selected = None
                 for cur in CURRENCIES.keys():
                     if cur in text:
@@ -145,10 +152,14 @@ def main():
                 send_message(TOKEN, chat_id, "Главное меню:", keyboard_main(is_admin))
                 continue
 
-            # --- Добавление дохода ---
+            # --- Добавить доход ---
             if text == "➕ Добавить доход":
+                if currency_user.get(chat_id) is None:
+                    send_message(TOKEN, chat_id, "Сначала выберите валюту командой /start.")
+                    continue
                 user_states[chat_id] = STATE_WAIT_INCOME_SUM
-                send_message(TOKEN, chat_id, f"Введите сумму дохода в {currency_user[chat_id]} {CURRENCIES[currency_user[chat_id]]} или '⬅️ Вернуться в меню':")
+                send_message(TOKEN, chat_id,
+                             f"Введите сумму дохода в {currency_user[chat_id]} {CURRENCIES[currency_user[chat_id]]} или '⬅️ Вернуться в меню':")
                 continue
 
             if state == STATE_WAIT_INCOME_SUM:
@@ -177,7 +188,6 @@ def main():
                     user_temp[chat_id]["type"] = "income"
                     send_message(TOKEN, chat_id, "Введите название новой категории дохода:")
                     continue
-                # Проверяем есть ли категория
                 if text in data["categories"]["income"]:
                     sum_income = user_temp[chat_id]["sum"]
                     add_transaction(chat_id, sum_income, text, "income")
@@ -189,10 +199,14 @@ def main():
                     send_message(TOKEN, chat_id, "Выберите категорию из списка или добавьте новую.")
                 continue
 
-            # --- Добавление расхода ---
+            # --- Добавить расход ---
             if text == "➖ Добавить расход":
+                if currency_user.get(chat_id) is None:
+                    send_message(TOKEN, chat_id, "Сначала выберите валюту командой /start.")
+                    continue
                 user_states[chat_id] = STATE_WAIT_EXPENSE_SUM
-                send_message(TOKEN, chat_id, f"Введите сумму расхода в {currency_user[chat_id]} {CURRENCIES[currency_user[chat_id]]} или '⬅️ Вернуться в меню':")
+                send_message(TOKEN, chat_id,
+                             f"Введите сумму расхода в {currency_user[chat_id]} {CURRENCIES[currency_user[chat_id]]} или '⬅️ Вернуться в меню':")
                 continue
 
             if state == STATE_WAIT_EXPENSE_SUM:
@@ -235,12 +249,16 @@ def main():
             # --- Добавление категории ---
             if state == STATE_ADD_CAT:
                 new_cat = text.strip()
-                if new_cat == "" or new_cat in data["categories"][user_temp[chat_id]["type"]]:
+                cat_type = user_temp.get(chat_id, {}).get("type")
+                if not cat_type:
+                    send_message(TOKEN, chat_id, "Ошибка. Попробуйте снова.")
+                    user_states[chat_id] = STATE_NONE
+                    continue
+                if new_cat == "" or new_cat in data["categories"][cat_type]:
                     send_message(TOKEN, chat_id, "Неверное или уже существующее название категории, попробуйте другое:")
                     continue
-                data["categories"][user_temp[chat_id]["type"]].append(new_cat)
+                data["categories"][cat_type].append(new_cat)
                 save_data()
-                cat_type = user_temp[chat_id]["type"]
                 send_message(TOKEN, chat_id, f"✅ Категория <b>{new_cat}</b> добавлена в {cat_type}. Выберите категорию из списка:", keyboard_categories(cat_type))
                 if cat_type == "income":
                     user_states[chat_id] = STATE_WAIT_INCOME_CAT
@@ -250,11 +268,11 @@ def main():
 
             # --- Отчет ---
             if text == "📊 Отчет":
-                user_states[chat_id] = "report_period"
+                user_states[chat_id] = STATE_REPORT_PERIOD
                 send_message(TOKEN, chat_id, "Выберите период отчета:", keyboard_report_period())
                 continue
 
-            if state == "report_period":
+            if state == STATE_REPORT_PERIOD:
                 if text == "⬅️ Вернуться в меню":
                     user_states[chat_id] = STATE_NONE
                     send_message(TOKEN, chat_id, "Главное меню:", keyboard_main(is_admin))
@@ -293,11 +311,12 @@ def main():
                 user_states[chat_id] = STATE_NONE
                 continue
 
-            # --- По умолчанию ---
+            # --- Неизвестная команда ---
             send_message(TOKEN, chat_id, "Неизвестная команда или сообщение. Используйте меню ниже.", keyboard_main(is_admin))
 
         time.sleep(1)
 
+# ====== ФУНКЦИИ ======
 def add_transaction(user_id, amount, category, ttype):
     user_data = data["users"].setdefault(str(user_id), {"income": [], "expense": []})
     user_data[ttype].append({
@@ -338,8 +357,8 @@ def generate_report(user_id, period):
     inc_sum = sum_by_category(filtered_inc)
     exp_sum = sum_by_category(filtered_exp)
 
-    total_inc = sum([v for v in inc_sum.values()])
-    total_exp = sum([v for v in exp_sum.values()])
+    total_inc = sum(inc_sum.values())
+    total_exp = sum(exp_sum.values())
     balance = total_inc - total_exp
 
     cur = currency_user.get(user_id, "RUB")
