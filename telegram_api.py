@@ -6,15 +6,14 @@ API_URL = "https://api.telegram.org/bot{token}/{method}"
 
 def api_call(token, method, params=None):
     url = API_URL.format(token=token, method=method)
-    if params is not None:
+    if params:
         data = urllib.parse.urlencode(params).encode('utf-8')
     else:
         data = None
-
     req = urllib.request.Request(url, data=data)
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            resp_data = response.read()
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp_data = resp.read()
             return json.loads(resp_data.decode('utf-8'))
     except Exception as e:
         print(f"Telegram API call error: {e}")
@@ -38,8 +37,7 @@ def send_message(token, chat_id, text, reply_markup=None):
     }
     if reply_markup:
         params["reply_markup"] = json.dumps(reply_markup)
-    result = api_call(token, "sendMessage", params)
-    return result
+    return api_call(token, "sendMessage", params)
 
 def answer_callback_query(token, callback_query_id, text=None, show_alert=False):
     params = {
@@ -48,4 +46,4 @@ def answer_callback_query(token, callback_query_id, text=None, show_alert=False)
     }
     if text:
         params["text"] = text
-    api_call(token, "answerCallbackQuery", params)
+    return api_call(token, "answerCallbackQuery", params)
