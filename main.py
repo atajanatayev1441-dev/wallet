@@ -7,8 +7,8 @@ from collections import defaultdict
 
 from telegram_api import send_message, get_updates, answer_callback_query
 
-TOKEN = os.getenv("BOT_TOKEN")  # Твой токен бота
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8283258905"))  # Админ ID
+TOKEN = os.getenv("BOT_TOKEN")  # Ваш токен
+ADMIN_ID = int(os.getenv("ADMIN_ID", "8283258905"))
 
 USERS_FILE = "users.json"
 DATA_FILE = "user_data.json"
@@ -58,16 +58,14 @@ def reset_state(chat_id):
     user_states[chat_id] = STATE_NONE
 
 def build_inline_keyboard(buttons):
-    import json
-    return json.dumps({"inline_keyboard": buttons})
+    return {"inline_keyboard": buttons}
 
 def build_reply_keyboard(buttons):
-    import json
-    return json.dumps({
+    return {
         "keyboard": buttons,
         "resize_keyboard": True,
         "one_time_keyboard": True
-    })
+    }
 
 def start_message(chat_id):
     text = "👋 <b>Привет! Выбери валюту для учета доходов и расходов:</b>"
@@ -83,7 +81,7 @@ def main_menu(chat_id):
     buttons = [
         [{"text": "➕ Добавить доход"}, {"text": "➖ Добавить расход"}],
         [{"text": "📊 Отчёты"}, {"text": "📈 Баланс"}],
-        [{"text": "✉️ Связь с админом"}]
+        [{"text": "📋 Мои операции"},  {"text": "✉️ Связь с админом"}]
     ]
     if chat_id == ADMIN_ID:
         buttons.append([{"text": "👥 Пользователи"}, {"text": "📢 Рассылка"}])
@@ -98,23 +96,23 @@ def is_valid_amount(text):
         return False
 
 def handle_income_amount(chat_id, text):
-    if text == "❌ Отмена":
+    if text == "🔙 В главное меню":
         reset_state(chat_id)
-        send_message(TOKEN, chat_id, "Добавление дохода отменено.")
+        send_message(TOKEN, chat_id, "Отмена операции.")
         main_menu(chat_id)
         return
     if not is_valid_amount(text):
-        send_message(TOKEN, chat_id, "Неверная сумма. Введите положительное число или ❌ Отмена.")
+        send_message(TOKEN, chat_id, "Неверная сумма. Введите положительное число или нажмите 🔙 В главное меню.")
         return
     user_data.setdefault(str(chat_id), {"income": [], "expense": []})
     user_states[chat_id] = STATE_ADD_INCOME_CATEGORY
     user_data[str(chat_id)]["temp_amount"] = float(text)
-    send_message(TOKEN, chat_id, "Введите категорию дохода или ❌ Отмена:")
+    send_message(TOKEN, chat_id, "Введите категорию дохода или нажмите 🔙 В главное меню:")
 
 def handle_income_category(chat_id, text):
-    if text == "❌ Отмена":
+    if text == "🔙 В главное меню":
         reset_state(chat_id)
-        send_message(TOKEN, chat_id, "Добавление дохода отменено.")
+        send_message(TOKEN, chat_id, "Отмена операции.")
         main_menu(chat_id)
         return
     amount = user_data[str(chat_id)].pop("temp_amount", 0)
@@ -126,23 +124,23 @@ def handle_income_category(chat_id, text):
     main_menu(chat_id)
 
 def handle_expense_amount(chat_id, text):
-    if text == "❌ Отмена":
+    if text == "🔙 В главное меню":
         reset_state(chat_id)
-        send_message(TOKEN, chat_id, "Добавление расхода отменено.")
+        send_message(TOKEN, chat_id, "Отмена операции.")
         main_menu(chat_id)
         return
     if not is_valid_amount(text):
-        send_message(TOKEN, chat_id, "Неверная сумма. Введите положительное число или ❌ Отмена.")
+        send_message(TOKEN, chat_id, "Неверная сумма. Введите положительное число или нажмите 🔙 В главное меню.")
         return
     user_data.setdefault(str(chat_id), {"income": [], "expense": []})
     user_states[chat_id] = STATE_ADD_EXPENSE_CATEGORY
     user_data[str(chat_id)]["temp_amount"] = float(text)
-    send_message(TOKEN, chat_id, "Введите категорию расхода или ❌ Отмена:")
+    send_message(TOKEN, chat_id, "Введите категорию расхода или нажмите 🔙 В главное меню:")
 
 def handle_expense_category(chat_id, text):
-    if text == "❌ Отмена":
+    if text == "🔙 В главное меню":
         reset_state(chat_id)
-        send_message(TOKEN, chat_id, "Добавление расхода отменено.")
+        send_message(TOKEN, chat_id, "Отмена операции.")
         main_menu(chat_id)
         return
     amount = user_data[str(chat_id)].pop("temp_amount", 0)
@@ -173,6 +171,35 @@ def filter_by_period(items, days):
     cutoff = datetime.now() - timedelta(days=days)
     return [item for item in items if parse_date(item["date"]) >= cutoff]
 
+def format_operations(ops):
+    lines = []
+    for op in ops[-20:][::-1]:  # последние 20 записей
+        dt = parse_date(op["date"]).strftime("%Y-%m-%d %H:%M")
+        lines.append(f"{dt} — {op['category']}: {op['amount']:.2f}")
+    if not lines:
+        return "Пока нет операций."
+    return "\n".join(lines)
+
+def show_operations(chat_id):
+    data = user_data.get(str(chat_id), {"income": [], "expense": []})
+    currency = user_currency.get(chat_id, "RUB")
+    income_text = format_operations(data.get("income", []))
+    expense_text = format_operations(data.get("expense", []))
+    text = (
+        f"📋 <b>Ваши последние доходы (в {currency}):</b>\n{income_text}\n\n"
+        f"📋 <b>Ваши последние расходы (в {currency}):</b>\n{expense_text}"
+    )
+    send_message(TOKEN, chat_id, text)
+
+def parse_report_period(text):
+    if "день" in text:
+        return 1
+    if "7" in text:
+        return 7
+    if "30" in text:
+        return 30
+    return 7  # по умолчанию
+
 def report_income(chat_id, days):
     data = user_data.get(str(chat_id), {"income": []})
     filtered = filter_by_period(data.get("income", []), days)
@@ -202,22 +229,45 @@ def report_expense(chat_id, days):
 def handle_report_type(chat_id, text):
     if text == "Доходы":
         user_states[chat_id] = (STATE_REPORT_CHOOSE_PERIOD, "income")
-        send_message(TOKEN, chat_id, "Выберите период:", build_inline_keyboard([
-            [{"text": "1 день", "callback_data": "report_income_1"}],
-            [{"text": "7 дней", "callback_data": "report_income_7"}],
-            [{"text": "30 дней", "callback_data": "report_income_30"}],
-            [{"text": "Отмена", "callback_data": "cancel"}],
+        send_message(TOKEN, chat_id, "Выберите период:", build_reply_keyboard([
+            ["1 день", "7 дней", "30 дней"],
+            ["🔙 В главное меню"]
         ]))
     elif text == "Расходы":
         user_states[chat_id] = (STATE_REPORT_CHOOSE_PERIOD, "expense")
-        send_message(TOKEN, chat_id, "Выберите период:", build_inline_keyboard([
-            [{"text": "1 день", "callback_data": "report_expense_1"}],
-            [{"text": "7 дней", "callback_data": "report_expense_7"}],
-            [{"text": "30 дней", "callback_data": "report_expense_30"}],
-            [{"text": "Отмена", "callback_data": "cancel"}],
+        send_message(TOKEN, chat_id, "Выберите период:", build_reply_keyboard([
+            ["1 день", "7 дней", "30 дней"],
+            ["🔙 В главное меню"]
         ]))
+    elif text == "🔙 В главное меню":
+        reset_state(chat_id)
+        main_menu(chat_id)
     else:
         send_message(TOKEN, chat_id, "Выберите 'Доходы' или 'Расходы'.")
+
+def handle_report_period(chat_id, text):
+    if text == "🔙 В главное меню":
+        reset_state(chat_id)
+        main_menu(chat_id)
+        return
+
+    state = user_states.get(chat_id)
+    if not state or not isinstance(state, tuple):
+        reset_state(chat_id)
+        main_menu(chat_id)
+        return
+
+    _, report_type = state
+    days = parse_report_period(text)
+
+    if report_type == "income":
+        report = report_income(chat_id, days)
+    else:
+        report = report_expense(chat_id, days)
+
+    send_message(TOKEN, chat_id, report)
+    reset_state(chat_id)
+    main_menu(chat_id)
 
 def handle_callback(update):
     callback = update.get("callback_query")
@@ -233,25 +283,6 @@ def handle_callback(update):
         answer_callback_query(TOKEN, callback_id)
         send_message(TOKEN, chat_id, f"Выбрана валюта: {currency} ✅")
         main_menu(chat_id)
-        return
-
-    if data.startswith("report_"):
-        answer_callback_query(TOKEN, callback_id)
-        parts = data.split("_")
-        if parts[-1] == "cancel":
-            reset_state(chat_id)
-            send_message(TOKEN, chat_id, "Отмена.")
-            main_menu(chat_id)
-            return
-        report_type = parts[1]
-        days = int(parts[2])
-        if report_type == "income":
-            text = report_income(chat_id, days)
-        else:
-            text = report_expense(chat_id, days)
-        send_message(TOKEN, chat_id, text)
-        main_menu(chat_id)
-        reset_state(chat_id)
         return
 
     if data == "cancel":
@@ -298,7 +329,7 @@ def handle_message(update):
         return
 
     if state == STATE_ADMIN_FEEDBACK:
-        if text == "❌ Отмена":
+        if text == "🔙 В главное меню":
             reset_state(chat_id)
             send_message(TOKEN, chat_id, "Отмена отправки сообщения админу.")
             main_menu(chat_id)
@@ -309,6 +340,14 @@ def handle_message(update):
             main_menu(chat_id)
         return
 
+    if state == STATE_REPORT_CHOOSE_TYPE:
+        handle_report_type(chat_id, text)
+        return
+
+    if state == STATE_REPORT_CHOOSE_PERIOD:
+        handle_report_period(chat_id, text)
+        return
+
     if text == "➕ Добавить доход":
         add_income_start(chat_id)
     elif text == "➖ Добавить расход":
@@ -317,25 +356,27 @@ def handle_message(update):
         show_balance(chat_id)
     elif text == "📊 Отчёты":
         user_states[chat_id] = STATE_REPORT_CHOOSE_TYPE
-        send_message(TOKEN, chat_id, "Выберите отчет:", build_reply_keyboard([["Доходы"], ["Расходы"], ["Отмена"]]))
-    elif text == "Отмена":
-        reset_state(chat_id)
-        send_message(TOKEN, chat_id, "Отмена.")
-        main_menu(chat_id)
+        send_message(TOKEN, chat_id, "Выберите отчет:", build_reply_keyboard([
+            ["Доходы", "Расходы"],
+            ["🔙 В главное меню"]
+        ]))
+    elif text == "📋 Мои операции":
+        show_operations(chat_id)
     elif text == "✉️ Связь с админом":
         user_states[chat_id] = STATE_ADMIN_FEEDBACK
-        send_message(TOKEN, chat_id, "Введите сообщение для администратора или ❌ Отмена:")
-    elif state == STATE_REPORT_CHOOSE_TYPE:
-        handle_report_type(chat_id, text)
+        send_message(TOKEN, chat_id, "Введите сообщение для администратора или 🔙 В главное меню:")
+    elif text == "🔙 В главное меню":
+        reset_state(chat_id)
+        main_menu(chat_id)
     else:
         main_menu(chat_id)
 
 def add_income_start(chat_id):
-    send_message(TOKEN, chat_id, "Введите сумму дохода или ❌ Отмена:", build_reply_keyboard([["❌ Отмена"]]))
+    send_message(TOKEN, chat_id, "Введите сумму дохода или 🔙 В главное меню:", build_reply_keyboard([["🔙 В главное меню"]]))
     user_states[chat_id] = STATE_ADD_INCOME_AMOUNT
 
 def add_expense_start(chat_id):
-    send_message(TOKEN, chat_id, "Введите сумму расхода или ❌ Отмена:", build_reply_keyboard([["❌ Отмена"]]))
+    send_message(TOKEN, chat_id, "Введите сумму расхода или 🔙 В главное меню:", build_reply_keyboard([["🔙 В главное меню"]]))
     user_states[chat_id] = STATE_ADD_EXPENSE_AMOUNT
 
 def main():
