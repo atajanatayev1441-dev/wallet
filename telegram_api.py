@@ -1,41 +1,42 @@
-import requests
+import urllib.request
+import urllib.parse
+import json
 
-BASE_URL = "https://api.telegram.org/bot"
+API_URL = "https://api.telegram.org/bot{token}/{method}"
 
-def get_updates(token, offset=None, timeout=20):
-    url = f"{BASE_URL}{token}/getUpdates"
+def api_call(token, method, params=None):
+    url = API_URL.format(token=token, method=method)
+    if params:
+        data = urllib.parse.urlencode(params).encode('utf-8')
+    else:
+        data = None
+
+    req = urllib.request.Request(url, data=data)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            resp_data = response.read()
+            # Декодируем ответ с utf-8
+            return json.loads(resp_data.decode('utf-8'))
+    except Exception as e:
+        print(f"Telegram API call error: {e}")
+        return None
+
+def get_updates(token, offset=0, timeout=20):
     params = {"timeout": timeout}
     if offset:
         params["offset"] = offset
-    resp = requests.get(url, params=params)
-    result = resp.json()
-    if not result["ok"]:
-        raise Exception("Ошибка получения обновлений")
-    return result["result"]
+    result = api_call(token, "getUpdates", params)
+    if result and result.get("ok"):
+        return result.get("result", [])
+    return []
 
-def send_message(token, chat_id, text, keyboard=None):
-    url = f"{BASE_URL}{token}/sendMessage"
-    payload = {
+def send_message(token, chat_id, text, reply_markup=None):
+    params = {
         "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML"
     }
-    if keyboard:
-        payload["reply_markup"] = keyboard
-    resp = requests.post(url, json=payload)
-    result = resp.json()
-    if not result["ok"]:
-        print(f"Telegram API call error: {result}")
-    return result
-
-def send_sticker(token, chat_id, sticker_id):
-    url = f"{BASE_URL}{token}/sendSticker"
-    payload = {
-        "chat_id": chat_id,
-        "sticker": sticker_id
-    }
-    resp = requests.post(url, json=payload)
-    result = resp.json()
-    if not result["ok"]:
-        print(f"Telegram API call error: {result}")
+    if reply_markup:
+        params["reply_markup"] = json.dumps(reply_markup)
+    result = api_call(token, "sendMessage", params)
     return result
