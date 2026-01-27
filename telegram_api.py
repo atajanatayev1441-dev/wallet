@@ -11,17 +11,6 @@ def api_call(token, method, params=None):
     else:
         data = None
 
-    if params and method in ("sendMessage", "editMessageText", "answerCallbackQuery"):
-        # При отправке кнопок, лучше JSON в reply_markup
-        if "reply_markup" in params:
-            rm = params["reply_markup"]
-            if isinstance(rm, str):
-                # Уже сериализовано
-                params["reply_markup"] = rm
-            else:
-                params["reply_markup"] = json.dumps(rm, ensure_ascii=False)
-            data = urllib.parse.urlencode(params).encode()
-
     req = urllib.request.Request(url, data=data)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -35,24 +24,18 @@ def get_updates(token, offset=0, timeout=20):
     params = {"timeout": timeout}
     if offset:
         params["offset"] = offset
-    return api_call(token, "getUpdates", params)
+    result = api_call(token, "getUpdates", params)
+    if result and result.get("ok"):
+        return result.get("result", [])
+    return []
 
 def send_message(token, chat_id, text, reply_markup=None):
     params = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "parse_mode": "HTML"
     }
     if reply_markup:
-        params["reply_markup"] = reply_markup
-    return api_call(token, "sendMessage", params)
-
-def answer_callback_query(token, callback_query_id, text=None, show_alert=False):
-    params = {
-        "callback_query_id": callback_query_id,
-        "show_alert": show_alert
-    }
-    if text:
-        params["text"] = text
-    return api_call(token, "answerCallbackQuery", params)
+        params["reply_markup"] = json.dumps(reply_markup)
+    result = api_call(token, "sendMessage", params)
+    return result
