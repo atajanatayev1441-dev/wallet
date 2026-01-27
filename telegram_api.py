@@ -8,7 +8,7 @@ def api_call(token, method, params=None):
     headers = {"Content-Type": "application/json"}
 
     if params is not None:
-        data = json.dumps(params).encode('utf-8')
+        data = json.dumps(params, ensure_ascii=False).encode('utf-8')  # ensure_ascii=False чтобы не экранировать кириллицу
     else:
         data = None
 
@@ -37,6 +37,6 @@ def send_message(token, chat_id, text, reply_markup=None):
         "parse_mode": "HTML"
     }
     if reply_markup:
-        params["reply_markup"] = json.dumps(reply_markup)
+        params["reply_markup"] = reply_markup  # передаем словарь напрямую, не сериализуем вручную
     result = api_call(token, "sendMessage", params)
     return result
