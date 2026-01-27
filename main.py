@@ -6,7 +6,12 @@ from wallet import WalletManager
 
 ADMIN_ID = 8283258905  # Telegram ID админа, чтобы пересылать сообщения поддержки
 
-TOKEN = os.getenv("8263345320:AAFr3_tHDhX_x0eNywQkq-SCXBTQG7avYvk")
+import os
+
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set. Set it in Railway Variables or environment.")
+
 
 wallet = WalletManager("data.json")
 offset = 0
@@ -120,5 +125,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
