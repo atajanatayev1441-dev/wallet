@@ -62,6 +62,15 @@ def build_inline_keyboard(buttons):
     keyboard = {"inline_keyboard": buttons}
     return json.dumps(keyboard)
 
+def build_cancel_keyboard():
+    buttons = [[{"text": "❌ Отмена"}]]
+    keyboard = {
+        "keyboard": buttons,
+        "resize_keyboard": True,
+        "one_time_keyboard": True
+    }
+    return json.dumps(keyboard)
+
 def answer_callback_query(token, callback_query_id):
     url = f"https://api.telegram.org/bot{token}/answerCallbackQuery"
     data = urllib.parse.urlencode({"callback_query_id": callback_query_id}).encode()
@@ -117,7 +126,7 @@ def main_menu_text_and_keyboard(chat_id):
 def send_users_file(token, chat_id, users):
     filename = "users.csv"
     try:
-        with open(filename, "w", newline='', encoding='utf-8') as f:
+        with open(filename, "w", newline='', encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["User Chat ID"])
             for user_id in users:
@@ -167,6 +176,12 @@ def handle_message(message, currency, user_data):
 
     add_user_if_new(chat_id)
 
+    if text == "❌ Отмена":
+        reset_state(chat_id)
+        text_, reply_markup = main_menu_text_and_keyboard(chat_id)
+        send_message(TOKEN, chat_id, "Действие отменено. Главное меню:", reply_markup)
+        return
+
     # Команда /users (только для админа)
     if text == "/users" or text == "👥 Количество пользователей":
         if chat_id == ADMIN_ID:
@@ -200,17 +215,18 @@ def handle_message(message, currency, user_data):
             reset_state(chat_id)
             return
         elif action == 'add_income':
+            cancel_kb = build_cancel_keyboard()
             if 'step' not in state or state['step'] == 1:
                 try:
                     amount = float(text.replace(",", "."))
                     if amount <= 0:
-                        send_message(TOKEN, chat_id, "❌ Введите положительное число для суммы.")
+                        send_message(TOKEN, chat_id, "❌ Введите положительное число для суммы.", cancel_kb)
                         return
                     user_states[chat_id]['amount'] = amount
                     user_states[chat_id]['step'] = 2
-                    send_message(TOKEN, chat_id, "Введите категорию дохода:")
+                    send_message(TOKEN, chat_id, "Введите категорию дохода:", cancel_kb)
                 except ValueError:
-                    send_message(TOKEN, chat_id, "❌ Пожалуйста, введите число для суммы.")
+                    send_message(TOKEN, chat_id, "❌ Пожалуйста, введите число для суммы.", cancel_kb)
                 return
             elif state['step'] == 2:
                 category = text
@@ -222,17 +238,18 @@ def handle_message(message, currency, user_data):
                 reset_state(chat_id)
                 return
         elif action == 'add_expense':
+            cancel_kb = build_cancel_keyboard()
             if 'step' not in state or state['step'] == 1:
                 try:
                     amount = float(text.replace(",", "."))
                     if amount <= 0:
-                        send_message(TOKEN, chat_id, "❌ Введите положительное число для суммы.")
+                        send_message(TOKEN, chat_id, "❌ Введите положительное число для суммы.", cancel_kb)
                         return
                     user_states[chat_id]['amount'] = amount
                     user_states[chat_id]['step'] = 2
-                    send_message(TOKEN, chat_id, "Введите категорию расхода:")
+                    send_message(TOKEN, chat_id, "Введите категорию расхода:", cancel_kb)
                 except ValueError:
-                    send_message(TOKEN, chat_id, "❌ Пожалуйста, введите число для суммы.")
+                    send_message(TOKEN, chat_id, "❌ Пожалуйста, введите число для суммы.", cancel_kb)
                 return
             elif state['step'] == 2:
                 category = text
@@ -262,12 +279,12 @@ def handle_message(message, currency, user_data):
 
     if text in ("➕ Добавить доход", "/add_income"):
         user_states[chat_id] = {'action': 'add_income', 'step': 1}
-        send_message(TOKEN, chat_id, "Введите сумму дохода:")
+        send_message(TOKEN, chat_id, "Введите сумму дохода:", build_cancel_keyboard())
         return
 
     if text in ("➖ Добавить расход", "/add_expense"):
         user_states[chat_id] = {'action': 'add_expense', 'step': 1}
-        send_message(TOKEN, chat_id, "Введите сумму расхода:")
+        send_message(TOKEN, chat_id, "Введите сумму расхода:", build_cancel_keyboard())
         return
 
     if text in ("💰 Баланс", "/balance"):
@@ -373,5 +390,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
