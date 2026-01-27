@@ -40,7 +40,6 @@ def save_all():
     save_json(DATA_FILE, data)
 
 def keyboard_inline(buttons):
-    # buttons: list of list of dicts {text, callback_data}
     return {"inline_keyboard": buttons}
 
 def main_menu_keyboard(chat_id):
@@ -147,7 +146,6 @@ def handle_callback(update):
     data_cb = callback["data"]
     callback_id = callback["id"]
 
-    # Отмена или возврат в меню
     if data_cb == "cancel":
         user_states.pop(str(chat_id), None)
         send_message(TOKEN, chat_id, "Действие отменено.", reply_markup=main_menu_keyboard(chat_id))
@@ -159,7 +157,6 @@ def handle_callback(update):
         answer_callback_query(TOKEN, callback_id)
         return
 
-    # Выбор валюты
     if data_cb.startswith("currency_"):
         currency = data_cb.split("_")[1]
         save_user_currency(chat_id, currency)
@@ -168,7 +165,6 @@ def handle_callback(update):
         answer_callback_query(TOKEN, callback_id)
         return
 
-    # Главное меню действия
     if data_cb == "add_income":
         user_states[str(chat_id)] = {"action": "input_income_amount"}
         send_message(TOKEN, chat_id, "Введите сумму дохода:", reply_markup=cancel_keyboard())
@@ -236,7 +232,6 @@ def handle_callback(update):
         answer_callback_query(TOKEN, callback_id)
         return
 
-    # Отчёты
     if data_cb.startswith("report_"):
         rep = data_cb.split("_")
         if len(rep) >= 2:
@@ -259,7 +254,6 @@ def handle_message(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "").strip()
 
-    # Регистрируем пользователя
     if str(chat_id) not in users:
         users[str(chat_id)] = {
             "id": chat_id,
@@ -270,12 +264,10 @@ def handle_message(update):
 
     state = user_states.get(str(chat_id), {})
 
-    # Выбор валюты
     if state.get("action") == "choosing_currency":
         send_message(TOKEN, chat_id, "Пожалуйста, выберите валюту с помощью кнопок ниже.", reply_markup=currency_keyboard())
         return
 
-    # Ввод суммы дохода
     if state.get("action") == "input_income_amount":
         if text == "❌ Отмена":
             send_message(TOKEN, chat_id, "Добавление дохода отменено.", reply_markup=main_menu_keyboard(chat_id))
@@ -290,7 +282,6 @@ def handle_message(update):
             send_message(TOKEN, chat_id, "Введите корректное число или нажмите ❌ Отмена.", reply_markup=cancel_keyboard())
         return
 
-    # Ввод суммы расхода
     if state.get("action") == "input_expense_amount":
         if text == "❌ Отмена":
             send_message(TOKEN, chat_id, "Добавление расхода отменено.", reply_markup=main_menu_keyboard(chat_id))
@@ -305,7 +296,6 @@ def handle_message(update):
             send_message(TOKEN, chat_id, "Введите корректное число или нажмите ❌ Отмена.", reply_markup=cancel_keyboard())
         return
 
-    # Добавление новой категории
     if state.get("action") == "adding_category":
         if text == "❌ Отмена":
             send_message(TOKEN, chat_id, "Добавление категории отменено.", reply_markup=main_menu_keyboard(chat_id))
@@ -321,10 +311,43 @@ def handle_message(update):
         user_states.pop(str(chat_id), None)
         return
 
-    # Связь с админом
     if state.get("action") == "contact_admin":
         if text == "❌ Отмена":
             send_message(TOKEN, chat_id, "Отправка сообщения администратору отменена.", reply_markup=main_menu_keyboard(chat_id))
             user_states.pop(str(chat_id), None)
             return
-        admin_message = f"Сообщение от пользователя <b>{users.get(str(chat_id), {}).get('first_name', '')} (@{users.get(str
+        admin_message = (
+            f"Сообщение от пользователя <b>{users.get(str(chat_id), {}).get('first_name', '')} "
+            f"(@{users.get(str(chat_id), {}).get('username', '')})</b>:\n\n{text}"
+        )
+        send_message(TOKEN, ADMIN_ID, admin_message)
+        send_message(TOKEN, chat_id, "Ваше сообщение отправлено администратору.", reply_markup=main_menu_keyboard(chat_id))
+        user_states.pop(str(chat_id), None)
+        return
+
+    # Команда /start
+    if text == "/start":
+        handle_start(chat_id)
+        return
+
+    # Если нет текущего действия — показать меню
+    if not state:
+        send_message(TOKEN, chat_id, "Выберите действие:", reply_markup=main_menu_keyboard(chat_id))
+
+def main():
+    init_data()
+    offset = 0
+    while True:
+        updates = get_updates(TOKEN, offset)
+        if not updates:
+            time.sleep(1)
+            continue
+        for update in updates:
+            offset = update["update_id"] + 1
+            if "callback_query" in update:
+                handle_callback(update)
+            elif "message" in update:
+                handle_message(update)
+
+if __name__ == "__main__":
+    main()
