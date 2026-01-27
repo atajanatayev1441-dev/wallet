@@ -2,8 +2,8 @@ import time
 import json
 from telegram_api import get_updates, send_message, answer_callback_query
 
-TOKEN = "ВАШ_ТОКЕН_ЗДЕСЬ"  # Поставьте свой токен
-ADMIN_ID = 123456789  # Замените на свой Telegram ID администратора
+TOKEN = "8263345320:AAFr3_tHDhX_x0eNywQkq-SCXBTQG7avYvk"  # Поставьте свой токен
+ADMIN_ID = 8283258905  # Замените на свой Telegram ID администратора
 
 # Файлы для хранения данных
 USERS_FILE = "users.json"
@@ -325,3 +325,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
