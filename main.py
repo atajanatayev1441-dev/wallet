@@ -4,7 +4,7 @@ import time
 from telegram_api import get_updates, send_message, answer_callback_query
 
 TOKEN = os.getenv("BOT_TOKEN")  # Установи через переменную окружения
-ADMIN_ID = 123456789  # Заменить на свой Telegram ID администратора
+ADMIN_ID = 8283258905 # Заменить на свой Telegram ID администратора
 
 DATA_DIR = "data"
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
@@ -434,3 +434,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
