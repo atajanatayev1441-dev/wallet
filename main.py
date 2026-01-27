@@ -14,12 +14,12 @@ STATE_ADMIN_BROADCAST = 5
 STATE_CONTACT_ADMIN = 6
 STATE_SELECT_CURRENCY = 7
 
-ADMIN_ID = 123456789  # <- Впиши сюда свой Telegram ID
+ADMIN_ID = 8283258905  # <- Впиши сюда свой Telegram ID
 
 CURRENCIES = {
     "RUB": "₽",
     "USD": "$",
-    "TMT": "T"
+    "TMT": 
 }
 
 CURRENCY_STICKERS = {
@@ -274,3 +274,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
