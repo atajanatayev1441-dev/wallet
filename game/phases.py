@@ -1,0 +1,5 @@
+LOBBY = "lobby"
+NIGHT = "night"
+DAY = "day"
+VOTING = "voting"
+ENDED = "ended"

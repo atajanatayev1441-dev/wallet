@@ -1,0 +1,7 @@
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+NIGHT_TIME = 60
+DAY_TIME = 60
+VOTING_TIME = 45
